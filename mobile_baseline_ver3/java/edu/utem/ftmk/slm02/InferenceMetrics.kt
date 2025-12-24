@@ -1,7 +1,8 @@
 //InferenceMetrics.kt
 package edu.utem.ftmk.slm01
 
-
+import android.os.Parcelable // 1. Add Import
+import kotlinx.parcelize.Parcelize // 2. Add Import
 /**
  * BITP 3453 Mobile Application Development
  *
@@ -10,9 +11,8 @@ package edu.utem.ftmk.slm01
  * Purpose:
  * Represent the metrics to measure the inference performance
  */
-
+@Parcelize // 3. Add Annotation
 data class InferenceMetrics (
-
     // Total time taken to complete the inference
     val latencyMs: Long,
 
@@ -22,17 +22,9 @@ data class InferenceMetrics (
     val totalPssKb: Long,
 
     // Efficiency metrics
-
-    // Time-to-First-Token
     val ttft: Long,
-
-    // Input-Token-Per-Second
     val itps: Long,
-
-    // Output-Token-Per-Second
     val otps: Long,
-
-    // Output-Evaluation-Time
     val oet: Long
 
-)
+) : Parcelable // 4. Implement Interface
