@@ -1,7 +1,7 @@
 visual studio code
 -import required library
 -run python openfoodfacts_to_txt.py for data collection part in terminal of vs code 
--refer command used for cleansing.txt for 
+-refer command used for cleansing.txt for   Activity 02
 -run python activity03_mapping.py for data mapping part in terminal of vs code(add your own gemini api key first before run the .py)
 note:
 -use ur own gemini api key becuz every gemini api key got its own usage limit,if 3 ppl access same api key might have issue ltr
