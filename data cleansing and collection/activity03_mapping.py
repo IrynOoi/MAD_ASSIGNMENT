@@ -5,12 +5,14 @@ import time
 # --- CONFIGURATION ---
 INPUT_FILE = 'foodraw.xlsx'
 OUTPUT_FILE = 'foodpreprocesseds.xlsx'
-API_KEY = "AIzaSyBJlCaa2AgaTN0rqale01xqW_jJk0SDMVE"  # Your API Key
+
+# 🔐 Set your API key securely (do NOT hardcode real keys)
+API_KEY = "YOUR_API_KEY_HERE"
 
 # Configure Gemini AI
 genai.configure(api_key=API_KEY)
 
-# ✅ Directly use Gemini 2.5 Flash (confirmed working)
+# Directly use Gemini 2.5 Flash
 model = genai.GenerativeModel("models/gemini-2.5-flash")
 
 
