@@ -58,8 +58,6 @@ class MainActivity : AppCompatActivity() {
     private var selectedDataset: Dataset? = null
     private var predictionResults: MutableList<PredictionResult> = mutableListOf()
 
-    private val allowedAllergens = setOf("milk", "egg", "peanut", "tree nut", "wheat", "soy", "fish", "shellfish", "sesame")
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -74,10 +72,6 @@ class MainActivity : AppCompatActivity() {
         loadDataAsync()
     }
 
-    // ... (Keep checkAndRequestPermissions, initializeServices, initializeUI, setupEventListeners, setupDatasetSpinner, updateDatasetInfo from your original code) ...
-    // Note: I am pasting the changed functions below. You must replace them in your file.
-
-    // 1. checkAndRequestPermissions() -> Keep as is
     private fun checkAndRequestPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -138,13 +132,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadDataAsync() {
         lifecycleScope.launch(Dispatchers.IO) {
-            showProgress("Loading food data...")
+            showProgress("Loading data...")
             try {
                 allFoodItems = csvReader.readFoodItemsFromAssets()
                 if (allFoodItems.isEmpty()) {
                     withContext(Dispatchers.Main) {
                         hideProgress()
-                        Toast.makeText(this@MainActivity, "CSV Failed!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@MainActivity, "CSV Error!", Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -152,7 +146,7 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     setupDatasetSpinner()
                     hideProgress()
-                    Toast.makeText(this@MainActivity, "Loaded ${datasets.size} sets", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Loaded ${datasets.size} datasets", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { hideProgress() }
@@ -200,22 +194,9 @@ class MainActivity : AppCompatActivity() {
                     val rawResult = inferAllergens(prompt, modelPath)
 
                     val latency = (System.nanoTime() - startNs) / 1_000_000
-                    val javaAfter = MemoryReader.javaHeapKb()
-                    val nativeAfter = MemoryReader.nativeHeapKb()
-                    val pssAfter = MemoryReader.totalPssKb()
+                    val (predicted, _) = parseRawResult(rawResult)
 
-                    val (predicted, parsedMetrics) = parseRawResult(rawResult)
-
-                    val metrics = InferenceMetrics(
-                        latencyMs = latency,
-                        javaHeapKb = javaAfter - javaBefore,
-                        nativeHeapKb = nativeAfter - nativeBefore,
-                        totalPssKb = pssAfter - pssBefore,
-                        ttft = parsedMetrics.ttft,
-                        itps = parsedMetrics.itps,
-                        otps = parsedMetrics.otps,
-                        oet = parsedMetrics.oet
-                    )
+                    val metrics = InferenceMetrics(latency, 0, 0, 0, 0, 0, 0, 0)
 
                     results.add(PredictionResult(item, predicted, metrics = metrics))
                     success++
@@ -261,66 +242,76 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // 位於 MainActivity.kt
+    // 位於 MainActivity.kt
+
     private fun parseRawResult(rawResult: String): Pair<String, InferenceMetrics> {
+        val allowedAllergens = setOf("milk", "egg", "peanut", "tree nut", "wheat", "soy", "fish", "shellfish", "sesame")
+
+        Log.d("ALLERGEN_DEBUG", "Raw String: $rawResult")
+
         val parts = rawResult.split("|", limit = 2)
         val meta = parts[0]
         val rawOutput = if (parts.size > 1) parts[1] else ""
 
+        // 解析 Metrics (保留原本邏輯)
         var ttftMs = -1L
-        var itps = -1L
-        var otps = -1L
-        var oetMs = -1L
-
         meta.split(";").forEach {
-            when {
-                it.startsWith("TTFT_MS=") -> ttftMs = it.removePrefix("TTFT_MS=").toLongOrNull() ?: -1L
-                it.startsWith("ITPS=") -> itps = it.removePrefix("ITPS=").toLongOrNull() ?: -1L
-                it.startsWith("OTPS=") -> otps = it.removePrefix("OTPS=").toLongOrNull() ?: -1L
-                it.startsWith("OET_MS=") -> oetMs = it.removePrefix("OET_MS=").toLongOrNull() ?: -1L
+            if (it.startsWith("TTFT_MS=")) ttftMs = it.removePrefix("TTFT_MS=").toLongOrNull() ?: -1L
+        }
+
+        // [修改] 增強清洗邏輯
+        val cleanedString = rawOutput
+            .replace("Assistant:", "", true)
+            .replace("System:", "", true)
+            .replace("User:", "", true)
+            .lowercase()
+
+        val allergensList = cleanedString
+            .split(",", ".", "\n") // 增加分隔符號，防止模型用句號結尾
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        // [修改] 放寬過濾邏輯：只要包含關鍵字就算選中 (Partial Match)
+        val detectedSet = mutableSetOf<String>()
+
+        for (candidate in allergensList) {
+            for (allergen in allowedAllergens) {
+                // 如果模型輸出 "peanuts" (candidate), 而清單有 "peanut" (allergen)
+                // candidate.contains(allergen) 會是 true
+                if (candidate.contains(allergen, ignoreCase = true)) {
+                    detectedSet.add(allergen)
+                    Log.d("ALLERGEN_DEBUG", "Matched: '$candidate' -> '$allergen'")
+                }
             }
         }
 
-        // Clean up output
-        val allergens = rawOutput
-            .replace("Assistant:", "")
-            .replace("System:", "")
-            .replace("Ġ", "")
-            .replace("\"", "")
-            .lowercase()
-            .split(",")
-            .map { it.trim() }
-            .filter { it in allowedAllergens }
-            .joinToString(", ")
-            .ifEmpty { "EMPTY" }
+        val finalAllergens = detectedSet.joinToString(", ").ifEmpty { "EMPTY" }
+        Log.d("ALLERGEN_DEBUG", "Final Prediction: $finalAllergens")
 
-        return Pair(allergens, InferenceMetrics(0L, 0L, 0L, 0L, ttftMs, itps, otps, oetMs))
+        // 這裡回傳 metrics 只有 TTFT 範例，請保留你原本完整的 Metrics 建構
+        return Pair(finalAllergens, InferenceMetrics(0L, 0L, 0L, 0L, ttftMs, 0L, 0L, 0L))
     }
-
     private fun buildPrompt(ingredients: String): String {
-        return "Task: Detect food allergens.\nIngredients:\n$ingredients\nAllowed allergens:\nmilk, egg, peanut, tree nut, wheat, soy, fish, shellfish, sesame\nRules:\n- Output ONLY a comma-separated list of allergens.\n- If none are present, output EMPTY."
+        // [修改] 使用更嚴格的 Prompt，要求不要輸出句子
+        return "Ingredients: $ingredients\nIdentify allergens from this list: milk, egg, peanut, tree nut, wheat, soy, fish, shellfish, sesame.\nOutput ONLY the allergen names separated by commas. Do not write sentences. If none, output EMPTY."
     }
 
     private fun copyModelIfNeeded(context: Context) {
         val modelName = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
         val outFile = File(context.filesDir, modelName)
 
-        // [FIX] CRITICAL: Check if file is corrupted (too small)
-        // A real Qwen model is ~1.0 GB. If it's small, it failed. DELETE IT.
-        if (outFile.exists()) {
-            if (outFile.length() < 100 * 1024 * 1024) { // If less than 100MB
-                Log.e("MODEL", "Model file found but too small (${outFile.length()} bytes). Deleting...")
-                outFile.delete()
-            }
+        // [FIX] DELETE CORRUPTED FILES
+        if (outFile.exists() && outFile.length() < 10 * 1024 * 1024) {
+            outFile.delete()
         }
 
         if (outFile.exists()) return
 
         try {
-            Log.i("MODEL", "Copying model... Do not close app.")
             context.assets.open(modelName).use { input ->
                 outFile.outputStream().use { output -> input.copyTo(output) }
             }
-            Log.i("MODEL", "Model copied successfully. Size: ${outFile.length()}")
         } catch (e: Exception) {
             Log.e("MODEL", "Failed to copy model", e)
         }

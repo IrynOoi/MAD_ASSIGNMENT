@@ -13,16 +13,15 @@ class CsvReader(private val context: Context) {
         try {
             context.assets.open("foodpreprocessed.csv").use { inputStream ->
                 val reader = BufferedReader(InputStreamReader(inputStream))
-                reader.readLine() // Skip header
+                reader.readLine()
 
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     if (line.isNullOrBlank()) continue
 
-                    // [FIX] Do NOT use .split(","). Use this manual parser.
+                    // [FIX] Manual parser to ignore commas inside quotes
                     val cols = parseCsvLine(line!!)
 
-                    // We need at least 5 columns (0 to 4) to get the Link
                     if (cols.size >= 5) {
                         fun String.clean() = this.trim().replace("\"", "")
 
@@ -32,8 +31,7 @@ class CsvReader(private val context: Context) {
                         val rawAllergens = cols[3].clean()
                         val link = cols[4].clean()
 
-                        // [FIX] If column 5 (Mapped) is missing/empty, use Raw Allergens (Col 3)
-                        // This fixes the "Expected: Empty" issue
+                        // [FIX] If mapped (col 5) is missing/empty, use rawAllergens (col 3)
                         val mapped = if (cols.size > 5 && cols[5].isNotBlank()) cols[5].clean() else rawAllergens
 
                         foodItems.add(FoodItem(id, name, ingredients, rawAllergens, link, mapped))
@@ -41,12 +39,12 @@ class CsvReader(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            Log.e("CSV_READER", "Error", e)
+            Log.e("CSV", "Error", e)
         }
         return foodItems
     }
 
-    // [FIX] This function handles "sugar, water" correctly so columns don't shift
+    // [FIX] Manual Parsing Logic
     private fun parseCsvLine(line: String): List<String> {
         val tokens = mutableListOf<String>()
         var sb = StringBuilder()
@@ -54,8 +52,8 @@ class CsvReader(private val context: Context) {
 
         for (char in line) {
             when {
-                char == '"' -> inQuotes = !inQuotes // Toggle mode
-                char == ',' && !inQuotes -> {       // Only split if NOT in quotes
+                char == '"' -> inQuotes = !inQuotes
+                char == ',' && !inQuotes -> {
                     tokens.add(sb.toString())
                     sb = StringBuilder()
                 }
