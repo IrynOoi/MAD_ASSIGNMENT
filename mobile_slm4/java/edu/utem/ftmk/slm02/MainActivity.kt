@@ -34,7 +34,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [FIX] Updated signature to accept model path
     external fun inferAllergens(input: String, modelPath: String): String
 
     private lateinit var csvReader: CsvReader
@@ -42,16 +41,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var firebaseService: FirebaseService
     private lateinit var notificationManager: NotificationManager
 
+    // UI Components
     private lateinit var spinnerDataset: Spinner
+    private lateinit var spinnerFoodItem: Spinner
     private lateinit var tvDatasetInfo: TextView
     private lateinit var btnLoadDataset: Button
+    private lateinit var btnPredictItem: Button
     private lateinit var btnPredictAll: Button
     private lateinit var btnViewResults: Button
     private lateinit var progressBar: ProgressBar
     private lateinit var tvProgress: TextView
-    private lateinit var editTextIngredients: EditText
-    private lateinit var btnPredict: Button
-    private lateinit var tvResult: TextView
 
     private var allFoodItems: List<FoodItem> = emptyList()
     private var datasets: List<Dataset> = emptyList()
@@ -89,23 +88,40 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeUI() {
         spinnerDataset = findViewById(R.id.spinnerDataset)
+        spinnerFoodItem = findViewById(R.id.spinnerFoodItem)
         tvDatasetInfo = findViewById(R.id.tvDatasetInfo)
+
         btnLoadDataset = findViewById(R.id.btnLoadDataset)
+        btnPredictItem = findViewById(R.id.btnPredictItem)
         btnPredictAll = findViewById(R.id.btnPredictAll)
         btnViewResults = findViewById(R.id.btnViewResults)
+
         progressBar = findViewById(R.id.progressBar)
         tvProgress = findViewById(R.id.tvProgress)
-        editTextIngredients = findViewById(R.id.editTextIngredients)
-        btnPredict = findViewById(R.id.btnPredict)
-        tvResult = findViewById(R.id.tvResult)
 
+        // Load Dataset 按鈕
         btnLoadDataset.setOnClickListener {
             val selectedPosition = spinnerDataset.selectedItemPosition
             if (selectedPosition >= 0 && selectedPosition < datasets.size) {
                 selectedDataset = datasets[selectedPosition]
                 updateDatasetInfo()
                 btnPredictAll.isEnabled = true
+
+                // 當 Dataset 載入後，填入 Item Spinner
+                setupFoodItemSpinner(selectedDataset!!)
+                btnPredictItem.isEnabled = true
+
                 Toast.makeText(this, "Dataset loaded: ${selectedDataset?.name}", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 單一項目預測按鈕
+        btnPredictItem.setOnClickListener {
+            val dataset = selectedDataset
+            val position = spinnerFoodItem.selectedItemPosition
+            if (dataset != null && position >= 0 && position < dataset.foodItems.size) {
+                val item = dataset.foodItems[position]
+                predictAndShowSingleItem(item)
             }
         }
 
@@ -121,18 +137,56 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
             }
         }
+    }
 
-        btnPredict.setOnClickListener {
-            val ingredients = editTextIngredients.text.toString()
-            if (ingredients.isNotEmpty()) {
-                performSinglePrediction(ingredients)
+    private fun setupFoodItemSpinner(dataset: Dataset) {
+        val itemNames = dataset.foodItems.map { it.name }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, itemNames)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerFoodItem.adapter = adapter
+    }
+
+    private fun predictAndShowSingleItem(item: FoodItem) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            // 單一預測時，我們把進度條設為 Indeterminate (跑馬燈模式)
+            withContext(Dispatchers.Main) {
+                progressBar.visibility = View.VISIBLE
+                progressBar.isIndeterminate = true
+                tvProgress.visibility = View.VISIBLE
+                tvProgress.text = "Predicting: ${item.name}..."
+            }
+
+            try {
+                val prompt = buildPrompt(item.ingredients)
+                val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
+                val rawResult = inferAllergens(prompt, modelFile.absolutePath)
+                val (predicted, _) = parseRawResult(rawResult)
+
+                val result = PredictionResult(item, predicted, metrics = InferenceMetrics(0,0,0,0,0,0,0,0))
+
+                withContext(Dispatchers.Main) {
+                    hideProgress()
+                    val intent = Intent(this@MainActivity, ResultsActivity::class.java).apply {
+                        putParcelableArrayListExtra("results", ArrayList(listOf(result)))
+                    }
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    hideProgress()
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
 
     private fun loadDataAsync() {
         lifecycleScope.launch(Dispatchers.IO) {
-            showProgress("Loading data...")
+            // 載入資料時顯示文字即可
+            withContext(Dispatchers.Main) {
+                tvProgress.visibility = View.VISIBLE
+                tvProgress.text = "Loading data..."
+            }
             try {
                 allFoodItems = csvReader.readFoodItemsFromAssets()
                 if (allFoodItems.isEmpty()) {
@@ -167,41 +221,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // [重要] 修改後的 Batch Prediction，支援進度條更新
     private fun startBatchPrediction(dataset: Dataset) {
         lifecycleScope.launch(Dispatchers.IO) {
-            showProgress("Starting batch...")
-            withContext(Dispatchers.Main) { btnPredictAll.isEnabled = false }
+
+            withContext(Dispatchers.Main) {
+                btnPredictAll.isEnabled = false
+                progressBar.visibility = View.VISIBLE
+                progressBar.isIndeterminate = false // 關閉跑馬燈，使用具體進度
+                progressBar.max = dataset.foodItems.size // 設定最大值
+                progressBar.progress = 0 // 重置
+                tvProgress.visibility = View.VISIBLE
+            }
 
             val results = mutableListOf<PredictionResult>()
             var success = 0
             var fail = 0
-
-            // [FIX] GET MODEL PATH DYNAMICALLY
             val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
             val modelPath = modelFile.absolutePath
 
             dataset.foodItems.forEachIndexed { index, item ->
-                withContext(Dispatchers.Main) { showProgress("Processing ${index + 1}/${dataset.foodItems.size}") }
+                // 更新進度條 UI
+                withContext(Dispatchers.Main) {
+                    progressBar.progress = index // 設定目前跑到第幾個
+                    tvProgress.text = "Processing ${index + 1}/${dataset.foodItems.size}: ${item.name}"
+                }
+
                 try {
                     val prompt = buildPrompt(item.ingredients)
-
-                    val javaBefore = MemoryReader.javaHeapKb()
-                    val nativeBefore = MemoryReader.nativeHeapKb()
-                    val pssBefore = MemoryReader.totalPssKb()
-                    val startNs = System.nanoTime()
-
-                    // [FIX] PASS PATH TO NATIVE
                     val rawResult = inferAllergens(prompt, modelPath)
-
-                    val latency = (System.nanoTime() - startNs) / 1_000_000
                     val (predicted, _) = parseRawResult(rawResult)
-
-                    val metrics = InferenceMetrics(latency, 0, 0, 0, 0, 0, 0, 0)
-
-                    results.add(PredictionResult(item, predicted, metrics = metrics))
+                    results.add(PredictionResult(item, predicted, metrics = InferenceMetrics(0, 0, 0, 0, 0, 0, 0, 0)))
                     success++
                     notificationManager.showProgressNotification(index + 1, dataset.foodItems.size, item.name)
-                    delay(50)
+                    // 小延遲讓 UI 有機會刷新，避免卡死
+                    delay(10)
                 } catch (e: Exception) {
                     fail++
                 }
@@ -221,46 +275,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun performSinglePrediction(ingredients: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val prompt = buildPrompt(ingredients)
-
-                // [FIX] GET MODEL PATH DYNAMICALLY
-                val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
-
-                // [FIX] PASS PATH TO NATIVE
-                val rawResult = inferAllergens(prompt, modelFile.absolutePath)
-
-                val (predicted, _) = parseRawResult(rawResult)
-                withContext(Dispatchers.Main) {
-                    tvResult.text = if (predicted.isEmpty() || predicted == "EMPTY") "No allergens" else "Detected: $predicted"
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { tvResult.text = "Error: ${e.message}" }
-            }
-        }
-    }
-
-    // 位於 MainActivity.kt
-    // 位於 MainActivity.kt
-
     private fun parseRawResult(rawResult: String): Pair<String, InferenceMetrics> {
         val allowedAllergens = setOf("milk", "egg", "peanut", "tree nut", "wheat", "soy", "fish", "shellfish", "sesame")
-
         Log.d("ALLERGEN_DEBUG", "Raw String: $rawResult")
 
         val parts = rawResult.split("|", limit = 2)
         val meta = parts[0]
         val rawOutput = if (parts.size > 1) parts[1] else ""
 
-        // 解析 Metrics (保留原本邏輯)
         var ttftMs = -1L
         meta.split(";").forEach {
             if (it.startsWith("TTFT_MS=")) ttftMs = it.removePrefix("TTFT_MS=").toLongOrNull() ?: -1L
         }
 
-        // [修改] 增強清洗邏輯
         val cleanedString = rawOutput
             .replace("Assistant:", "", true)
             .replace("System:", "", true)
@@ -268,20 +295,15 @@ class MainActivity : AppCompatActivity() {
             .lowercase()
 
         val allergensList = cleanedString
-            .split(",", ".", "\n") // 增加分隔符號，防止模型用句號結尾
+            .split(",", ".", "\n")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
-        // [修改] 放寬過濾邏輯：只要包含關鍵字就算選中 (Partial Match)
         val detectedSet = mutableSetOf<String>()
-
         for (candidate in allergensList) {
             for (allergen in allowedAllergens) {
-                // 如果模型輸出 "peanuts" (candidate), 而清單有 "peanut" (allergen)
-                // candidate.contains(allergen) 會是 true
                 if (candidate.contains(allergen, ignoreCase = true)) {
                     detectedSet.add(allergen)
-                    Log.d("ALLERGEN_DEBUG", "Matched: '$candidate' -> '$allergen'")
                 }
             }
         }
@@ -289,23 +311,17 @@ class MainActivity : AppCompatActivity() {
         val finalAllergens = detectedSet.joinToString(", ").ifEmpty { "EMPTY" }
         Log.d("ALLERGEN_DEBUG", "Final Prediction: $finalAllergens")
 
-        // 這裡回傳 metrics 只有 TTFT 範例，請保留你原本完整的 Metrics 建構
         return Pair(finalAllergens, InferenceMetrics(0L, 0L, 0L, 0L, ttftMs, 0L, 0L, 0L))
     }
+
     private fun buildPrompt(ingredients: String): String {
-        // [修改] 使用更嚴格的 Prompt，要求不要輸出句子
         return "Ingredients: $ingredients\nIdentify allergens from this list: milk, egg, peanut, tree nut, wheat, soy, fish, shellfish, sesame.\nOutput ONLY the allergen names separated by commas. Do not write sentences. If none, output EMPTY."
     }
 
     private fun copyModelIfNeeded(context: Context) {
         val modelName = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
         val outFile = File(context.filesDir, modelName)
-
-        // [FIX] DELETE CORRUPTED FILES
-        if (outFile.exists() && outFile.length() < 10 * 1024 * 1024) {
-            outFile.delete()
-        }
-
+        if (outFile.exists() && outFile.length() < 10 * 1024 * 1024) outFile.delete()
         if (outFile.exists()) return
 
         try {
@@ -317,16 +333,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showProgress(message: String) {
-        runOnUiThread {
-            progressBar.visibility = View.VISIBLE
-            tvProgress.text = message
-        }
-    }
-
     private fun hideProgress() {
         runOnUiThread {
             progressBar.visibility = View.GONE
+            tvProgress.visibility = View.GONE
             tvProgress.text = "Ready"
         }
     }

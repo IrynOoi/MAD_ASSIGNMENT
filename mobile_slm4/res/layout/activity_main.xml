@@ -1,125 +1,122 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:orientation="vertical">
 
-    <!-- Header -->
-    <TextView
+    <!--  App Bar -->
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Food Allergen Predictor"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:layout_marginBottom="24dp"/>
+        android:layout_height="56dp"
+        android:background="#3F51B5"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp">
 
-    <!-- Dataset Selection -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Select Dataset:"
-        android:textSize="16sp"
-        android:layout_marginBottom="8dp"/>
+        <TextView
+            android:layout_width="386dp"
+            android:layout_height="wrap_content"
+            android:text="Food Allergen Predictor"
+            android:textAlignment="center"
+            android:textColor="@android:color/white"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
-    <Spinner
-        android:id="@+id/spinnerDataset"
+    <!-- Main Content -->
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"/>
+        android:layout_height="match_parent"
+        android:padding="16dp">
 
-    <!-- Dataset Info -->
-    <TextView
-        android:id="@+id/tvDatasetInfo"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="No dataset selected"
-        android:textSize="14sp"
-        android:layout_marginBottom="24dp"/>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
-    <!-- Action Buttons -->
-    <Button
-        android:id="@+id/btnLoadDataset"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Load Dataset"
-        android:layout_marginBottom="8dp"/>
 
-    <Button
-        android:id="@+id/btnPredictAll"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Predict All in Dataset"
-        android:layout_marginBottom="8dp"
-        android:enabled="false"/>
 
-    <Button
-        android:id="@+id/btnViewResults"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="View Results"
-        android:layout_marginBottom="24dp"
-        android:visibility="gone"/>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Select Dataset:"
+                android:textStyle="bold" />
 
-    <!-- Progress Section -->
-    <ProgressBar
-        android:id="@+id/progressBar"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:indeterminate="false"
-        android:max="100"
-        android:progressTint="#4CAF50"
-        android:progressBackgroundTint="#CCCCCC"
-        android:visibility="gone"/>
+            <Spinner
+                android:id="@+id/spinnerDataset"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp" />
 
-    <TextView
-        android:id="@+id/tvProgress"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Ready"
-        android:gravity="center"
-        android:layout_marginTop="8dp"/>
+            <Button
+                android:id="@+id/btnLoadDataset"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Load Dataset" />
 
-    <!-- Quick Test Section (from original) -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="#CCCCCC"
-        android:layout_marginVertical="16dp"/>
+            <TextView
+                android:id="@+id/tvDatasetInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="No dataset selected" />
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Quick Test (Single Item):"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="8dp"/>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Select Item to Predict (Faster):"
+                android:textStyle="bold" />
 
-    <EditText
-        android:id="@+id/editTextIngredients"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Enter ingredients (comma separated)"
-        android:layout_marginBottom="8dp"/>
+            <Spinner
+                android:id="@+id/spinnerFoodItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp" />
 
-    <Button
-        android:id="@+id/btnPredict"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Predict Allergens"
-        android:layout_marginBottom="8dp"/>
+            <Button
+                android:id="@+id/btnPredictItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:enabled="false"
+                android:text="Predict This Item Only" />
 
-    <TextView
-        android:id="@+id/tvResult"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textSize="14sp"
-        android:padding="8dp"
-        android:background="#f0f0f0"/>
+            <Button
+                android:id="@+id/btnPredictAll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:enabled="false"
+                android:text="Predict All (roughly take 25 minutes)"
+                android:backgroundTint="#FF5722" />
+
+            <Button
+                android:id="@+id/btnViewResults"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="View Batch Results"
+                android:visibility="gone" />
+
+            <ProgressBar
+                android:id="@+id/progressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="24dp"
+                android:layout_marginTop="16dp"
+                android:max="100"
+                android:progress="0"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginBottom="16dp"
+                android:text="Ready"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
 
 </LinearLayout>
