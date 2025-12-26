@@ -11,35 +11,42 @@ class CsvReader(private val context: Context) {
     fun readFoodItemsFromAssets(): List<FoodItem> {
         val foodItems = mutableListOf<FoodItem>()
         try {
+            // Make sure the filename matches your uploaded file
             context.assets.open("foodpreprocessed.csv").use { inputStream ->
                 val reader = BufferedReader(InputStreamReader(inputStream))
-                reader.readLine()
+                reader.readLine() // Skip the header row
 
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     if (line.isNullOrBlank()) continue
 
-                    // [FIX] Manual parser to ignore commas inside quotes
                     val cols = parseCsvLine(line!!)
 
+                    // We now expect at least 6 columns based on your CSV structure
                     if (cols.size >= 5) {
                         fun String.clean() = this.trim().replace("\"", "")
 
+                        // --- NEW MAPPING BASED ON YOUR CSV ORDER ---
                         val id = cols[0].clean()
                         val name = cols[1].clean()
-                        val ingredients = cols[2].clean()
-                        val rawAllergens = cols[3].clean()
-                        val link = cols[4].clean()
+                        val link = cols[2].clean()          // Column 2 is Link
+                        val ingredients = cols[3].clean()   // Column 3 is Ingredients
+                        val rawAllergens = cols[4].clean()  // Column 4 is AllergensRaw
 
-                        // [FIX] If mapped (col 5) is missing/empty, use rawAllergens (col 3)
-                        val mapped = if (cols.size > 5 && cols[5].isNotBlank()) cols[5].clean() else rawAllergens
+                        // Handle column 5 (Mapped) safely in case it's missing or empty
+                        var mapped = ""
+                        if (cols.size > 5) {
+                            mapped = cols[5].clean()
+                        }
 
+                        // Pass to FoodItem in the order defined in your FoodItem.kt data class:
+                        // (id, name, ingredients, allergens, link, allergensMapped)
                         foodItems.add(FoodItem(id, name, ingredients, rawAllergens, link, mapped))
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e("CSV", "Error", e)
+            Log.e("CSV", "Error reading CSV", e)
         }
         return foodItems
     }

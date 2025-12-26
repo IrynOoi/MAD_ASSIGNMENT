@@ -1,7 +1,6 @@
 //ResultsActivity.kt
 package edu.utem.ftmk.slm02
 
-import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -17,7 +16,6 @@ class ResultsActivity : AppCompatActivity() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: ResultsAdapter
 
-    @SuppressLint("MissingInflatedId")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_results)
@@ -41,10 +39,11 @@ class ResultsActivity : AppCompatActivity() {
 
         class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
             val tvFoodName: TextView = view.findViewById(R.id.tvFoodName)
-            val tvIngredients: TextView = view.findViewById(R.id.tvIngredients)
-            val tvRawAllergens: TextView = view.findViewById(R.id.tvRawAllergens) // [NEW]
-            val tvExpected: TextView = view.findViewById(R.id.tvExpected)
-            val tvPredicted: TextView = view.findViewById(R.id.tvPredicted)
+            // Note: Use the new IDs for the 'Value' textviews
+            val tvIngredients: TextView = view.findViewById(R.id.tvIngredientsValue)
+            val tvRawAllergens: TextView = view.findViewById(R.id.tvRawAllergensValue)
+            val tvExpected: TextView = view.findViewById(R.id.tvExpectedValue)
+            val tvPredicted: TextView = view.findViewById(R.id.tvPredictedValue)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -54,16 +53,25 @@ class ResultsActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val result = results[position]
+            val item = results[position]
 
-            holder.tvFoodName.text = result.foodItem.name
-            holder.tvIngredients.text = "Ingredients: ${result.foodItem.ingredients}"
+            // 1. Food Name
+            holder.tvFoodName.text = item.foodItem.name
 
-            // [NEW] Bind Raw Allergens
-            holder.tvRawAllergens.text = "Raw Allergens: ${result.foodItem.allergens}"
+            // 2. Ingredients (Just the value)
+            holder.tvIngredients.text = item.foodItem.ingredients
 
-            holder.tvExpected.text = "Mapped (Expected): ${result.foodItem.allergensMapped}"
-            holder.tvPredicted.text = "Predicted: ${result.predictedAllergens}"
+            // 3. Raw Allergens
+            val rawText = if (item.foodItem.allergens.isEmpty() || item.foodItem.allergens == "empty") "None" else item.foodItem.allergens
+            holder.tvRawAllergens.text = rawText
+
+            // 4. Mapped (Expected)
+            val mappedText = if (item.foodItem.allergensMapped.isEmpty()) "None" else item.foodItem.allergensMapped
+            holder.tvExpected.text = mappedText
+
+            // 5. Predicted
+            val predictionText = item.predictedAllergens ?: "Loading..."
+            holder.tvPredicted.text = predictionText
         }
 
         override fun getItemCount() = results.size

@@ -61,3 +61,6 @@ app/
 
 
 can type command "adb logcat -s ALLERGEN_DEBUG" in terminal to check the progress of predicting all or predict one item
+
+
+can type BUILD_CHECK in the filter textbox for logcat
