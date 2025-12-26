@@ -34,7 +34,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    external fun inferAllergens(input: String, modelPath: String): String
+    // [MODIFIED] Added 'reportProgress' parameter
+    external fun inferAllergens(input: String, modelPath: String, reportProgress: Boolean): String
 
     private lateinit var csvReader: CsvReader
     private lateinit var datasetManager: DatasetManager
@@ -71,6 +72,22 @@ class MainActivity : AppCompatActivity() {
         loadDataAsync()
     }
 
+    // [NEW] Callback method called from C++ Native Code
+    fun updateNativeProgress(percent: Int) {
+        runOnUiThread {
+            if (progressBar.visibility == View.VISIBLE && !progressBar.isIndeterminate) {
+                // Ensure we don't exceed max
+                val safePercent = percent.coerceIn(0, 100)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    progressBar.setProgress(safePercent, true)
+                } else {
+                    progressBar.progress = safePercent
+                }
+                tvProgress.text = "Predicting: $safePercent%"
+            }
+        }
+    }
+
     private fun checkAndRequestPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -99,23 +116,18 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         tvProgress = findViewById(R.id.tvProgress)
 
-        // Load Dataset 按鈕
         btnLoadDataset.setOnClickListener {
             val selectedPosition = spinnerDataset.selectedItemPosition
             if (selectedPosition >= 0 && selectedPosition < datasets.size) {
                 selectedDataset = datasets[selectedPosition]
                 updateDatasetInfo()
                 btnPredictAll.isEnabled = true
-
-                // 當 Dataset 載入後，填入 Item Spinner
                 setupFoodItemSpinner(selectedDataset!!)
                 btnPredictItem.isEnabled = true
-
                 Toast.makeText(this, "Dataset loaded: ${selectedDataset?.name}", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // 單一項目預測按鈕
         btnPredictItem.setOnClickListener {
             val dataset = selectedDataset
             val position = spinnerFoodItem.selectedItemPosition
@@ -148,20 +160,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun predictAndShowSingleItem(item: FoodItem) {
         lifecycleScope.launch(Dispatchers.IO) {
-            // 單一預測時，我們把進度條設為 Indeterminate (跑馬燈模式)
+            // [MODIFIED] Setup progress bar for single item (0% to 100%)
             withContext(Dispatchers.Main) {
                 progressBar.visibility = View.VISIBLE
-                progressBar.isIndeterminate = true
+                progressBar.isIndeterminate = false
+                progressBar.max = 100
+                progressBar.progress = 0
                 tvProgress.visibility = View.VISIBLE
-                tvProgress.text = "Predicting: ${item.name}..."
+                tvProgress.text = "Predicting: 0%"
             }
 
             try {
                 val prompt = buildPrompt(item.ingredients)
                 val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
-                val rawResult = inferAllergens(prompt, modelFile.absolutePath)
-                val (predicted, _) = parseRawResult(rawResult)
 
+                // [MODIFIED] Pass true to enable internal percentage updates from C++
+                val rawResult = inferAllergens(prompt, modelFile.absolutePath, true)
+
+                val (predicted, _) = parseRawResult(rawResult)
                 val result = PredictionResult(item, predicted, metrics = InferenceMetrics(0,0,0,0,0,0,0,0))
 
                 withContext(Dispatchers.Main) {
@@ -182,7 +198,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadDataAsync() {
         lifecycleScope.launch(Dispatchers.IO) {
-            // 載入資料時顯示文字即可
             withContext(Dispatchers.Main) {
                 tvProgress.visibility = View.VISIBLE
                 tvProgress.text = "Loading data..."
@@ -221,16 +236,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [重要] 修改後的 Batch Prediction，支援進度條更新
     private fun startBatchPrediction(dataset: Dataset) {
         lifecycleScope.launch(Dispatchers.IO) {
 
             withContext(Dispatchers.Main) {
                 btnPredictAll.isEnabled = false
                 progressBar.visibility = View.VISIBLE
-                progressBar.isIndeterminate = false // 關閉跑馬燈，使用具體進度
-                progressBar.max = dataset.foodItems.size // 設定最大值
-                progressBar.progress = 0 // 重置
+                progressBar.isIndeterminate = false
+                progressBar.max = dataset.foodItems.size
+                progressBar.progress = 0
                 tvProgress.visibility = View.VISIBLE
             }
 
@@ -241,20 +255,23 @@ class MainActivity : AppCompatActivity() {
             val modelPath = modelFile.absolutePath
 
             dataset.foodItems.forEachIndexed { index, item ->
-                // 更新進度條 UI
+                // [MODIFIED] Calculate batch percentage
+                val batchPercent = ((index + 1) * 100) / dataset.foodItems.size
+
                 withContext(Dispatchers.Main) {
-                    progressBar.progress = index // 設定目前跑到第幾個
-                    tvProgress.text = "Processing ${index + 1}/${dataset.foodItems.size}: ${item.name}"
+                    progressBar.progress = index + 1
+                    // Show "Processing 5/10 (50%)"
+                    tvProgress.text = "Processing ${index + 1}/${dataset.foodItems.size} ($batchPercent%): ${item.name}"
                 }
 
                 try {
                     val prompt = buildPrompt(item.ingredients)
-                    val rawResult = inferAllergens(prompt, modelPath)
+                    // [MODIFIED] Pass false to disable single-item progress (avoids conflict)
+                    val rawResult = inferAllergens(prompt, modelPath, false)
                     val (predicted, _) = parseRawResult(rawResult)
                     results.add(PredictionResult(item, predicted, metrics = InferenceMetrics(0, 0, 0, 0, 0, 0, 0, 0)))
                     success++
                     notificationManager.showProgressNotification(index + 1, dataset.foodItems.size, item.name)
-                    // 小延遲讓 UI 有機會刷新，避免卡死
                     delay(10)
                 } catch (e: Exception) {
                     fail++
@@ -309,8 +326,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         val finalAllergens = detectedSet.joinToString(", ").ifEmpty { "EMPTY" }
-        Log.d("ALLERGEN_DEBUG", "Final Prediction: $finalAllergens")
-
         return Pair(finalAllergens, InferenceMetrics(0L, 0L, 0L, 0L, ttftMs, 0L, 0L, 0L))
     }
 
