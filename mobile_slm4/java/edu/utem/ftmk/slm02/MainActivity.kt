@@ -3,6 +3,7 @@ package edu.utem.ftmk.slm02
 
 import FirebaseService
 import android.Manifest
+import android.animation.ObjectAnimator // [ADDED] For smooth animation
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -10,11 +11,13 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.animation.DecelerateInterpolator // [ADDED] For smooth animation
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.firebase.firestore.BuildConfig
 import edu.utem.ftmk.slm01.InferenceMetrics
 import edu.utem.ftmk.slm01.MemoryReader
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +37,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [MODIFIED] Added 'reportProgress' parameter
     external fun inferAllergens(input: String, modelPath: String, reportProgress: Boolean): String
 
     private lateinit var csvReader: CsvReader
@@ -59,6 +61,10 @@ class MainActivity : AppCompatActivity() {
     private var predictionResults: MutableList<PredictionResult> = mutableListOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+
+        // ===== Build Type Debug/Release Log =====
+        Log.d("BUILD_CHECK", "Current Build Type: ${BuildConfig.BUILD_TYPE}")
+        // ========================================
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -72,18 +78,22 @@ class MainActivity : AppCompatActivity() {
         loadDataAsync()
     }
 
-    // [NEW] Callback method called from C++ Native Code
+    // [FIXED] This function caused the "drop to 40%" bug.
+    // I added a check so it ONLY runs when we are NOT doing a batch prediction.
     fun updateNativeProgress(percent: Int) {
         runOnUiThread {
-            if (progressBar.visibility == View.VISIBLE && !progressBar.isIndeterminate) {
-                // Ensure we don't exceed max
-                val safePercent = percent.coerceIn(0, 100)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    progressBar.setProgress(safePercent, true)
-                } else {
-                    progressBar.progress = safePercent
+            // SAFETY GUARD: Only update if the "Predict All" button is ENABLED.
+            // If it is disabled, it means a batch is running, so we IGNORE this update.
+            if (btnPredictAll.isEnabled) {
+                if (progressBar.visibility == View.VISIBLE && !progressBar.isIndeterminate) {
+                    val safePercent = percent.coerceIn(0, 100)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        progressBar.setProgress(safePercent, true)
+                    } else {
+                        progressBar.progress = safePercent
+                    }
+                    tvProgress.text = "Predicting: $safePercent%"
                 }
-                tvProgress.text = "Predicting: $safePercent%"
             }
         }
     }
@@ -160,7 +170,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun predictAndShowSingleItem(item: FoodItem) {
         lifecycleScope.launch(Dispatchers.IO) {
-            // [MODIFIED] Setup progress bar for single item (0% to 100%)
             withContext(Dispatchers.Main) {
                 progressBar.visibility = View.VISIBLE
                 progressBar.isIndeterminate = false
@@ -174,7 +183,7 @@ class MainActivity : AppCompatActivity() {
                 val prompt = buildPrompt(item.ingredients)
                 val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
 
-                // [MODIFIED] Pass true to enable internal percentage updates from C++
+                // Single item: We WANT progress reports (true)
                 val rawResult = inferAllergens(prompt, modelFile.absolutePath, true)
 
                 val (predicted, _) = parseRawResult(rawResult)
@@ -195,6 +204,109 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    // [MODIFIED] Batch Prediction with Smooth Animation
+    private fun startBatchPrediction(dataset: Dataset) {
+        lifecycleScope.launch(Dispatchers.IO) {
+
+            // 1. Initial UI Setup
+            withContext(Dispatchers.Main) {
+                btnPredictAll.isEnabled = false
+                progressBar.visibility = View.VISIBLE
+                progressBar.isIndeterminate = false
+                progressBar.max = 100
+                progressBar.progress = 0
+                tvProgress.visibility = View.VISIBLE
+                tvProgress.text = "Preparing..." // 只顯示一下下
+            }
+
+            val results = mutableListOf<PredictionResult>()
+            var success = 0
+            var fail = 0
+            val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
+            val modelPath = modelFile.absolutePath
+
+            val totalItems = dataset.foodItems.size
+            var itemsProcessed = 0
+
+            for ((index, item) in dataset.foodItems.withIndex()) {
+
+                // [FIX 1] 在預測「開始前」先更新文字！
+                // 這樣就不會卡在 "Initializing"，而是直接顯示 "Processing 1/10: Apple..."
+                val currentStatusText = "Processing ${index + 1}/$totalItems: ${item.name}"
+                withContext(Dispatchers.Main) {
+                    tvProgress.text = "$currentStatusText..."
+                }
+
+                try {
+                    val prompt = buildPrompt(item.ingredients)
+
+                    // A. THE REAL WORK (這裡會花時間，尤其是第一次)
+                    val rawResult = inferAllergens(prompt, modelPath, false)
+
+                    val (predicted, _) = parseRawResult(rawResult)
+                    results.add(PredictionResult(item, predicted, metrics = InferenceMetrics(0, 0, 0, 0, 0, 0, 0, 0)))
+                    success++
+                    notificationManager.showProgressNotification(index + 1, totalItems, item.name)
+
+                    // B. THE SMOOTH ANIMATION
+                    delay(1000)
+
+                    // C. CALCULATE PERCENTAGE
+                    itemsProcessed++
+                    val targetPercentage = (itemsProcessed.toFloat() / totalItems.toFloat()) * 100
+
+                    // D. UPDATE UI SMOOTHLY
+                    // [FIX 2] 把現在的文字 (currentStatusText) 傳進去，讓動畫不要覆蓋掉它
+                    withContext(Dispatchers.Main) {
+                        animateProgress(targetPercentage.toInt(), currentStatusText)
+                    }
+
+                } catch (e: Exception) {
+                    fail++
+                }
+            }
+
+            // Save results
+            val (fbSuccess, fbFail) = firebaseService.saveBatchResults(results)
+            predictionResults.clear()
+            predictionResults.addAll(results)
+
+            // Final Completion State
+            withContext(Dispatchers.Main) {
+                // Ensure bar is full
+                animateProgress(100, "Finishing up")
+                delay(800)
+
+                hideProgress()
+                btnPredictAll.isEnabled = true
+                btnViewResults.visibility = View.VISIBLE
+                notificationManager.showCompletionNotification(success, totalItems, dataset.name, fbSuccess, fbFail)
+                Toast.makeText(this@MainActivity, "Batch Processing Completed!", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // [NEW] Helper function for smooth sliding animation + Counting Text
+    private fun animateProgress(targetProgress: Int, messagePrefix: String) {
+        val animation = ObjectAnimator.ofInt(
+            progressBar,
+            "progress",
+            progressBar.progress,
+            targetProgress
+        )
+
+        animation.duration = 800
+        animation.interpolator = DecelerateInterpolator()
+
+        animation.addUpdateListener { valueAnimator ->
+            val animatedValue = valueAnimator.animatedValue as Int
+            tvProgress.text = "$messagePrefix ($animatedValue%)"
+        }
+
+        animation.start()
+    }
+
 
     private fun loadDataAsync() {
         lifecycleScope.launch(Dispatchers.IO) {
@@ -233,62 +345,6 @@ class MainActivity : AppCompatActivity() {
     private fun updateDatasetInfo() {
         selectedDataset?.let {
             tvDatasetInfo.text = "Selected: ${it.name}\nItems: ${it.foodItems.size}"
-        }
-    }
-
-    private fun startBatchPrediction(dataset: Dataset) {
-        lifecycleScope.launch(Dispatchers.IO) {
-
-            withContext(Dispatchers.Main) {
-                btnPredictAll.isEnabled = false
-                progressBar.visibility = View.VISIBLE
-                progressBar.isIndeterminate = false
-                progressBar.max = dataset.foodItems.size
-                progressBar.progress = 0
-                tvProgress.visibility = View.VISIBLE
-            }
-
-            val results = mutableListOf<PredictionResult>()
-            var success = 0
-            var fail = 0
-            val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
-            val modelPath = modelFile.absolutePath
-
-            dataset.foodItems.forEachIndexed { index, item ->
-                // [MODIFIED] Calculate batch percentage
-                val batchPercent = ((index + 1) * 100) / dataset.foodItems.size
-
-                withContext(Dispatchers.Main) {
-                    progressBar.progress = index + 1
-                    // Show "Processing 5/10 (50%)"
-                    tvProgress.text = "Processing ${index + 1}/${dataset.foodItems.size} ($batchPercent%): ${item.name}"
-                }
-
-                try {
-                    val prompt = buildPrompt(item.ingredients)
-                    // [MODIFIED] Pass false to disable single-item progress (avoids conflict)
-                    val rawResult = inferAllergens(prompt, modelPath, false)
-                    val (predicted, _) = parseRawResult(rawResult)
-                    results.add(PredictionResult(item, predicted, metrics = InferenceMetrics(0, 0, 0, 0, 0, 0, 0, 0)))
-                    success++
-                    notificationManager.showProgressNotification(index + 1, dataset.foodItems.size, item.name)
-                    delay(10)
-                } catch (e: Exception) {
-                    fail++
-                }
-            }
-
-            val (fbSuccess, fbFail) = firebaseService.saveBatchResults(results)
-            predictionResults.clear()
-            predictionResults.addAll(results)
-
-            withContext(Dispatchers.Main) {
-                hideProgress()
-                btnPredictAll.isEnabled = true
-                btnViewResults.visibility = View.VISIBLE
-                notificationManager.showCompletionNotification(success, dataset.foodItems.size, dataset.name, fbSuccess, fbFail)
-                Toast.makeText(this@MainActivity, "Batch Complete!", Toast.LENGTH_LONG).show()
-            }
         }
     }
 
