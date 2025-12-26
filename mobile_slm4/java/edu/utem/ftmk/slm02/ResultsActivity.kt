@@ -42,6 +42,7 @@ class ResultsActivity : AppCompatActivity() {
         class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
             val tvFoodName: TextView = view.findViewById(R.id.tvFoodName)
             val tvIngredients: TextView = view.findViewById(R.id.tvIngredients)
+            val tvRawAllergens: TextView = view.findViewById(R.id.tvRawAllergens) // [NEW]
             val tvExpected: TextView = view.findViewById(R.id.tvExpected)
             val tvPredicted: TextView = view.findViewById(R.id.tvPredicted)
         }
@@ -57,7 +58,11 @@ class ResultsActivity : AppCompatActivity() {
 
             holder.tvFoodName.text = result.foodItem.name
             holder.tvIngredients.text = "Ingredients: ${result.foodItem.ingredients}"
-            holder.tvExpected.text = "Expected: ${result.foodItem.allergensMapped}"
+
+            // [NEW] Bind Raw Allergens
+            holder.tvRawAllergens.text = "Raw Allergens: ${result.foodItem.allergens}"
+
+            holder.tvExpected.text = "Mapped (Expected): ${result.foodItem.allergensMapped}"
             holder.tvPredicted.text = "Predicted: ${result.predictedAllergens}"
         }
 

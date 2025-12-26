@@ -1,10 +1,7 @@
 // FirebaseService.kt
-
-import android.os.Build
 import android.util.Log
-import com.google.firebase.firestore.BuildConfig
-import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
 import edu.utem.ftmk.slm02.PredictionResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
@@ -16,20 +13,18 @@ class FirebaseService {
 
     suspend fun savePredictionResult(result: PredictionResult): String {
         return try {
-            // Convert to map for Firestore
+            // [MODIFIED] Only include the specific fields required by the assignment (a-h)
             val data = hashMapOf<String, Any>(
-                "dataId" to result.foodItem.id,
-                "name" to result.foodItem.name,
-                "ingredients" to result.foodItem.ingredients,
-                "allergens" to result.foodItem.allergens,
-                "mappedAllergens" to result.foodItem.allergensMapped,
-                "predictedAllergens" to result.predictedAllergens,
-                "timestamp" to FieldValue.serverTimestamp(),
-                "deviceModel" to Build.MODEL,
-                "appVersion" to BuildConfig.VERSION_NAME
+                "dataId" to result.foodItem.id,               // a. Data id
+                "name" to result.foodItem.name,               // b. Name
+                "ingredients" to result.foodItem.ingredients, // c. Ingredients
+                "allergens" to result.foodItem.allergens,     // d. Allergens (Raw)
+                "mappedAllergens" to result.foodItem.allergensMapped, // e. Mapped Allergens
+                "predictedAllergens" to result.predictedAllergens,    // f. Predicted Allergens
+                "timestamp" to FieldValue.serverTimestamp()   // g. Timestamp
             )
 
-            // Add metrics if available
+            // h. All inference metrics
             result.metrics?.let { metrics ->
                 data["metrics"] = hashMapOf(
                     "latencyMs" to metrics.latencyMs,

@@ -31,11 +31,20 @@
             android:textColor="#555555" />
 
         <TextView
-            android:id="@+id/tvExpected"
+            android:id="@+id/tvRawAllergens"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Expected: ..."
+            android:text="Raw Allergens: ..."
+            android:textColor="#555555"
+            android:textStyle="italic" />
+
+        <TextView
+            android:id="@+id/tvExpected"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Mapped (Expected): ..."
             android:textColor="#333333" />
 
         <TextView
