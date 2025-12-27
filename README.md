@@ -5,6 +5,9 @@ PREDICT ONE ITEM
 <img width="500" height="1000" alt="image" src="https://github.com/user-attachments/assets/4c6be1bd-a961-4eaf-834d-93be5d69f97e" />
 
 
+TIME USING FOR PREDICT ONE ITEM:
+<img width="500" height="1000" alt="image" src="https://github.com/user-attachments/assets/485fd186-4102-4216-a517-ee87b3ea913a" />
+
 
 
 PREDICT ALL ITEM FROM ONE DATASET AT ONCE
