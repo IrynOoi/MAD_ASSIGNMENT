@@ -14,5 +14,6 @@ PREDICT ALL ITEM FROM ONE DATASET AT ONCE
 
 TIME USING FOR PREDICT ALL: around 42 minutes
 
-<img width="591" height="1280" alt="image" src="https://github.com/user-attachments/assets/67eb783e-32a3-49f6-9d84-6769c406a0fa" />
+<img width="500" height="1000" alt="image" src="https://github.com/user-attachments/assets/612d4a5e-0b53-4b60-8e34-52dec20c325b" />
+
 
