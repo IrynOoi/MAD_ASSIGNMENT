@@ -1,9 +1,9 @@
 //MainActivity.kt
 package edu.utem.ftmk.slm02
 
+
 import FirebaseService
 import android.Manifest
-import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -19,9 +18,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.firebase.firestore.BuildConfig
 import edu.utem.ftmk.slm01.InferenceMetrics
-import edu.utem.ftmk.slm01.MemoryReader
+import edu.utem.ftmk.slm02.MemoryReader
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -61,10 +59,7 @@ class MainActivity : AppCompatActivity() {
     private var predictionResults: MutableList<PredictionResult> = mutableListOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-
-        // ===== Build Type Debug/Release Log =====
         Log.d("BUILD_CHECK", "Current Build Type: ${BuildConfig.BUILD_TYPE}")
-        // ========================================
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -78,24 +73,24 @@ class MainActivity : AppCompatActivity() {
         loadDataAsync()
     }
 
-    // [FIXED] Safety guard for progress updates
+    // Safety guard for progress updates coming from C++
     fun updateNativeProgress(percent: Int) {
         runOnUiThread {
-            // Only update if "Predict All" is enabled (meaning NOT currently running a batch)
-            // OR if we specifically want to force it for single item.
-            // The logic here is: If batch is running (btn disabled), we ignore this to prevent UI stutter.
-            // If single item is running, we usually want to see it.
             if (progressBar.visibility == View.VISIBLE && !progressBar.isIndeterminate) {
-                val safePercent = percent.coerceIn(0, 100)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    progressBar.setProgress(safePercent, true)
+                // If we are predicting a single item, we want detailed progress
+                // If we are predicting ALL, we generally ignore this specific update
+                // because the batch loop handles the main progress bar.
+                if (!btnPredictAll.isEnabled) {
+                    // Batch running: Ignore single token updates to prevent flickering
+                    // or update a secondary bar if you had one.
                 } else {
-                    progressBar.progress = safePercent
-                }
-
-                // Only update text if NOT in batch mode (Batch mode handles its own text)
-                if (btnPredictAll.isEnabled) {
-                    tvProgress.text = "Predicting: $safePercent%"
+                    // Single item running: Show token generation progress
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        progressBar.setProgress(percent, true)
+                    } else {
+                        progressBar.progress = percent
+                    }
+                    tvProgress.text = "Predicting: $percent%"
                 }
             }
         }
@@ -171,7 +166,6 @@ class MainActivity : AppCompatActivity() {
         spinnerFoodItem.adapter = adapter
     }
 
-    // [UPDATED] Single Item Prediction with Full Metrics
     private fun predictAndShowSingleItem(item: FoodItem) {
         lifecycleScope.launch(Dispatchers.IO) {
             withContext(Dispatchers.Main) {
@@ -187,26 +181,21 @@ class MainActivity : AppCompatActivity() {
                 val prompt = buildPrompt(item.ingredients)
                 val modelFile = File(filesDir, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
 
-                // 1. MEASURE MEMORY BEFORE
                 val javaBefore = MemoryReader.javaHeapKb()
                 val nativeBefore = MemoryReader.nativeHeapKb()
                 val pssBefore = MemoryReader.totalPssKb()
                 val startNs = System.nanoTime()
 
-                // 2. RUN INFERENCE
-                // reportProgress = true so we see the bar moving for single items
+                // reportProgress = true for single item
                 val rawResult = inferAllergens(prompt, modelFile.absolutePath, true)
 
-                // 3. MEASURE AFTER
                 val latencyMs = (System.nanoTime() - startNs) / 1_000_000
                 val javaAfter = MemoryReader.javaHeapKb()
                 val nativeAfter = MemoryReader.nativeHeapKb()
                 val pssAfter = MemoryReader.totalPssKb()
 
-                // 4. PARSE RESULT (Get TTFT, ITPS, OTPS, OET from C++ output)
                 val (predicted, cppMetrics) = parseRawResult(rawResult)
 
-                // 5. MERGE METRICS
                 val finalMetrics = InferenceMetrics(
                     latencyMs = latencyMs,
                     javaHeapKb = javaAfter - javaBefore,
@@ -219,8 +208,6 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 val result = PredictionResult(item, predicted, metrics = finalMetrics)
-
-                // 6. SAVE TO FIREBASE
                 firebaseService.savePredictionResult(result)
 
                 withContext(Dispatchers.Main) {
@@ -239,11 +226,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [UPDATED] Batch Prediction with Full Metrics
+    // [MODIFIED] Faster Batch Prediction with correct Progress Bar
     private fun startBatchPrediction(dataset: Dataset) {
         lifecycleScope.launch(Dispatchers.IO) {
 
-            // 1. Initial UI Setup
             withContext(Dispatchers.Main) {
                 btnPredictAll.isEnabled = false
                 progressBar.visibility = View.VISIBLE
@@ -273,26 +259,21 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val prompt = buildPrompt(item.ingredients)
 
-                    // --- START MEASURING ---
                     val javaBefore = MemoryReader.javaHeapKb()
                     val nativeBefore = MemoryReader.nativeHeapKb()
                     val pssBefore = MemoryReader.totalPssKb()
                     val startNs = System.nanoTime()
 
-                    // A. THE REAL WORK
-                    // reportProgress = false (Batch manages its own progress bar)
+                    // reportProgress = false because we are updating the bar per ITEM, not per token
                     val rawResult = inferAllergens(prompt, modelPath, false)
 
-                    // --- STOP MEASURING ---
                     val latencyMs = (System.nanoTime() - startNs) / 1_000_000
                     val javaAfter = MemoryReader.javaHeapKb()
                     val nativeAfter = MemoryReader.nativeHeapKb()
                     val pssAfter = MemoryReader.totalPssKb()
 
-                    // Parse Result & C++ Metrics
                     val (predicted, cppMetrics) = parseRawResult(rawResult)
 
-                    // Calculate Final Metrics
                     val finalMetrics = InferenceMetrics(
                         latencyMs = latencyMs,
                         javaHeapKb = javaAfter - javaBefore,
@@ -304,20 +285,24 @@ class MainActivity : AppCompatActivity() {
                         oet = cppMetrics.oet
                     )
 
-                    // Add to results list with REAL metrics
                     results.add(PredictionResult(item, predicted, metrics = finalMetrics))
 
                     success++
                     notificationManager.showProgressNotification(index + 1, totalItems, item.name)
 
-                    // B. SMOOTH ANIMATION DELAY
-                    delay(500)
+                    // [REMOVED] delay(500) - Removed artificial delay for maximum speed
 
-                    // C. UPDATE UI
                     itemsProcessed++
                     val targetPercentage = (itemsProcessed.toFloat() / totalItems.toFloat()) * 100
+
                     withContext(Dispatchers.Main) {
-                        animateProgress(targetPercentage.toInt(), currentStatusText)
+                        // Use native setProgress with animation (API 24+)
+                        // This prevents the "jumping back" issue of custom ObjectAnimators
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            progressBar.setProgress(targetPercentage.toInt(), true)
+                        } else {
+                            progressBar.progress = targetPercentage.toInt()
+                        }
                     }
 
                 } catch (e: Exception) {
@@ -326,15 +311,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // Save results to Firebase
             val (fbSuccess, fbFail) = firebaseService.saveBatchResults(results)
             predictionResults.clear()
             predictionResults.addAll(results)
 
-            // Final Completion State
             withContext(Dispatchers.Main) {
-                animateProgress(100, "Finishing up")
-                delay(800)
+                // Ensure bar is full at the end
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    progressBar.setProgress(100, true)
+                } else {
+                    progressBar.progress = 100
+                }
+                tvProgress.text = "Completed!"
+
+                // Small delay just so the user sees "Completed" before it disappears
+                kotlinx.coroutines.delay(500)
 
                 hideProgress()
                 btnPredictAll.isEnabled = true
@@ -343,26 +334,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, "Batch Completed! Success: $success, Fail: $fail", Toast.LENGTH_LONG).show()
             }
         }
-    }
-
-    // Helper for smooth animation
-    private fun animateProgress(targetProgress: Int, messagePrefix: String) {
-        val animation = ObjectAnimator.ofInt(
-            progressBar,
-            "progress",
-            progressBar.progress,
-            targetProgress
-        )
-
-        animation.duration = 800
-        animation.interpolator = DecelerateInterpolator()
-
-        animation.addUpdateListener { valueAnimator ->
-            val animatedValue = valueAnimator.animatedValue as Int
-            tvProgress.text = "$messagePrefix ($animatedValue%)"
-        }
-
-        animation.start()
     }
 
     private fun loadDataAsync() {
@@ -406,14 +377,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseRawResult(rawResult: String): Pair<String, InferenceMetrics> {
-        // List of supported allergens we want to detect
         val allowedAllergens = setOf(
             "milk", "egg", "peanut", "tree nut",
             "wheat", "soy", "fish", "shellfish", "sesame"
         )
 
-        // 1. Parse metadata section (TTFT, ITPS, OTPS, OET)
-        // Format example: "TTFT_MS=12;ITPS=34;OTPS=56;OET_MS=78|<model output>"
         val parts = rawResult.split("|", limit = 2)
         val meta = parts[0]
         val rawOutput = if (parts.size > 1) parts[1] else ""
@@ -423,22 +391,15 @@ class MainActivity : AppCompatActivity() {
         var otps = 0L
         var oet = 0L
 
-        // Extract numeric values from metadata
         meta.split(";").forEach {
             when {
-                it.startsWith("TTFT_MS=") ->
-                    ttft = it.removePrefix("TTFT_MS=").toLongOrNull() ?: 0L
-                it.startsWith("ITPS=") ->
-                    itps = it.removePrefix("ITPS=").toLongOrNull() ?: 0L
-                it.startsWith("OTPS=") ->
-                    otps = it.removePrefix("OTPS=").toLongOrNull() ?: 0L
-                it.startsWith("OET_MS=") ->
-                    oet = it.removePrefix("OET_MS=").toLongOrNull() ?: 0L
+                it.startsWith("TTFT_MS=") -> ttft = it.removePrefix("TTFT_MS=").toLongOrNull() ?: 0L
+                it.startsWith("ITPS=") -> itps = it.removePrefix("ITPS=").toLongOrNull() ?: 0L
+                it.startsWith("OTPS=") -> otps = it.removePrefix("OTPS=").toLongOrNull() ?: 0L
+                it.startsWith("OET_MS=") -> oet = it.removePrefix("OET_MS=").toLongOrNull() ?: 0L
             }
         }
 
-        // 2. Clean the model output and prepare for allergen matching
-        // Remove role prefixes and normalize to lowercase
         val cleanedString = rawOutput
             .replace("Assistant:", "", ignoreCase = true)
             .replace("System:", "", ignoreCase = true)
@@ -447,22 +408,15 @@ class MainActivity : AppCompatActivity() {
 
         val detectedSet = mutableSetOf<String>()
 
-        // Use regex with word boundaries to avoid overlap issues
-        // Example: prevent "shellfish" from matching "fish"
         for (allergen in allowedAllergens) {
-            // \b ensures full-word matching only
             val regex = "\\b${Regex.escape(allergen)}\\b".toRegex()
             if (regex.containsMatchIn(cleanedString)) {
                 detectedSet.add(allergen)
             }
         }
 
-        // Join detected allergens into a comma-separated string
-        // If none found, return "EMPTY"
         val finalAllergens = detectedSet.joinToString(", ").ifEmpty { "EMPTY" }
 
-        // Return parsed allergens and inference metrics
-        // Note: latency and memory values are calculated externally
         return Pair(
             finalAllergens,
             InferenceMetrics(0, 0, 0, 0, ttft, itps, otps, oet)
@@ -470,7 +424,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildPrompt(ingredients: String): String {
-        return "Ingredients: $ingredients\nIdentify allergens from this list: milk, egg, peanut, tree nut, wheat, soy, fish, shellfish, sesame.\nOutput ONLY the allergen names separated by commas. Do not write sentences. If none, output EMPTY."
+        return """
+        Task: Detect food allergens.
+
+        Ingredients:
+        $ingredients
+
+        Allowed allergens:
+        milk, egg, peanut, tree nut, wheat, soy, fish, shellfish, sesame
+
+        Rules:
+        - Output ONLY a comma-separated list of allergens.
+        - If none are present, output EMPTY.
+        - Do not explain.
+        - Do not add extra words.
+    """.trimIndent()
     }
 
     private fun copyModelIfNeeded(context: Context) {

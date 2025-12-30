@@ -1,5 +1,5 @@
 //MemoryReader.kt
-package edu.utem.ftmk.slm01
+package edu.utem.ftmk.slm02
 
 import android.os.Debug
 

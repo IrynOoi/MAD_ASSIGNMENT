@@ -9,9 +9,10 @@ import kotlinx.coroutines.tasks.await
 class FirebaseService {
 
     private val db = FirebaseFirestore.getInstance()
-    private val collection = db.collection("allergen_predictions")
+    private val collection = db.collection("allergen_prediction")
 
-    suspend fun savePredictionResult(result: PredictionResult): String {
+    suspend fun savePredictionResult(result: PredictionResult): String
+    {
         return try {
             // [MODIFIED] Only include the specific fields required by the assignment (a-h)
             val data = hashMapOf<String, Any>(
